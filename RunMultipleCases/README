@@ -1,0 +1,9 @@
+0. Modify the NewCase/input.cpp file to suit the case
+1. g++ creator.cpp; ./a.out
+2. nohup ./run_script &
+3. tail -n 20 ./nohup.out > var_vs_theta.dat
+4. vim var_vs_theta.dat
+5. :%s/var-// 
+6. :%s/theta\ = \/ 
+
+Last two lines are to remove the text and retain only the data
