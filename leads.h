@@ -32,7 +32,8 @@ public:
         bool WritePhaseSpace;int PhaseStoreInterval;
         bool WriteTrajectories;int EveryParticle;
         
-        bool WriteSpatialFieldsProfile,RunFullSimulation; 
+        bool WriteSpatialFieldsProfile,RunFullSimulation;
+        bool StoreTrajectories;
         double at_time;
         int xy,xz,yz;
          
@@ -85,6 +86,7 @@ class LEADS_Dynamics
   	
   	mat posi,velo,momt,accl,bfield,efield,vT,vKAPPA;
   	cube vRP,vBETA,vBETADOT,vNNU;
+  	mat traj0,beta0; // nT x 3 history of particle 0, kept regardless of StoreTrajectories
   	vec TR,egama;
   	
   	double th_st,th_en,dTh,ph_st,ph_en,dPh;

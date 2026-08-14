@@ -19,13 +19,18 @@ LEADS_Dynamics ::LEADS_Dynamics()
  InitializeParticles();
   
  nT = int(2 * t_shift / dTau) + 1;
- vRP   = zeros(NP,3,nT); 
- vBETA = zeros(NP,3,nT);
- vBETADOT = zeros(NP,3,nT);
- vNNU = zeros(NP,3,nT);
- vT = zeros(NP,nT);
- vKAPPA = zeros(NP,nT);
- TR = linspace(-t_shift,t_shift,nT); 
+ if(in.StoreTrajectories)
+ {
+  vRP   = zeros(NP,3,nT);
+  vBETA = zeros(NP,3,nT);
+  vBETADOT = zeros(NP,3,nT);
+  vNNU = zeros(NP,3,nT);
+  vT = zeros(NP,nT);
+  vKAPPA = zeros(NP,nT);
+ }
+ traj0 = zeros(nT,3);
+ beta0 = zeros(nT,3);
+ TR = linspace(-t_shift,t_shift,nT);
   
  th_st = in.DetecThetaStart * pi/180.0;
  th_en = in.DetecThetaEnd   * pi/180.0; 
@@ -42,16 +47,26 @@ void LEADS_Dynamics ::Run()
   LEADS_Dynamics();
   
   Print("Starting interaction dynamics");
+  auto PusherStart = high_resolution_clock::now();
   for(int i = 0; i < nT ; i++)
   {
     for(int j = 0;j< NP;j++)
     {
-     CalForceMovePart(TR(i),j);  
+     CalForceMovePart(TR(i),j);
     }
-    vRP.slice(i) = posi;
-    vBETA.slice(i) = velo;
-    vBETADOT.slice(i) = accl;
+    traj0.row(i) = posi.row(0);
+    beta0.row(i) = velo.row(0);
+    if(in.StoreTrajectories)
+    {
+     vRP.slice(i) = posi;
+     vBETA.slice(i) = velo;
+     vBETADOT.slice(i) = accl;
+    }
   }
+  auto PusherEnd = high_resolution_clock::now();
+  double PusherSeconds = duration_cast<duration<double>>(PusherEnd - PusherStart).count();
+  VPrint("PusherLoopTime_sec",PusherSeconds);
+  VPrint("FinalStateChecksum",accu(abs(posi)) + accu(abs(momt)));
   Print("Elec. trajectories calculated");
   
   WriteSelectedData();

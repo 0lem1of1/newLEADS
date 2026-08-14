@@ -43,7 +43,14 @@ void LEADS_Simulation ::  ParameterChecks()
   Print("Invalid Polarization, aborting LEADS");cout << endl;
   exit(0);
  }
-   
+
+ if(!in.StoreTrajectories && (in.CalculateSpectrum || in.AngularDistribution ||
+    in.SignalEmitted || in.CalculatePower || in.WritePhaseSpace || in.WriteTrajectories))
+ {
+  Print("StoreTrajectories=false requires all trajectory diagnostics off, aborting LEADS");cout << endl;
+  exit(0);
+ }
+
 }
 
 void LEADS_Simulation :: Run_Simulation(int NThreads)

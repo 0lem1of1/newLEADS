@@ -4,7 +4,7 @@ LEADS_Input :: LEADS_Input()
 {
   //------------------------------------------------------------------------------------------ 
   //RunParameters
-   RadiationReaction = true;   // Include Radiation Reaction true/false
+   RadiationReaction = false;  // Include Radiation Reaction true/false
    RRModel           = 0;      // 0 <= RRModel <= 3; See Parameter info at bottom
    SimulationTime    = 3;      // Simulation time (x Tau_FWHM)
    TimeStep          = 5.0E-3; // Simulation time step in 'femtoseconds' or 'dimensionless'
@@ -50,7 +50,7 @@ LEADS_Input :: LEADS_Input()
   //Diagnostics: Spectrum Module
    WriteTrajecAfter  = 1;      // Write Phase space after time steps
    CalculatePower    = false;   // true/false
-   CalculateSpectrum = true ;   // true/false
+   CalculateSpectrum = false;   // true/false
    SignalEmitted     = false;   // true/false
    AngularDistribution = false; // true/false
    
@@ -82,8 +82,9 @@ LEADS_Input :: LEADS_Input()
    //------------------------------------------------------------------------------------------ 
    //Diagnostics: Spatial laser profiles
    
-   WriteSpatialFieldsProfile = true; 
-   RunFullSimulation = false;
+   WriteSpatialFieldsProfile = true;
+   RunFullSimulation = true;
+   StoreTrajectories = false;   // false => skip NP*3*nT history cubes, final-state only
    at_time = 0;
    xy = 1; xz = 0; yz = 0; 
  }

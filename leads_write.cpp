@@ -214,10 +214,8 @@ void LEADS_Dynamics ::WriteSelectedData()
 {
   //------------------------------------------------------------------------------------- 
   Print("Saving 0th elec. trajectory");
-  mat store = vRP( span(0), span::all, span::all );
-  mat stGama0 = vBETA( span(0), span::all, span::all );
-  stGama0 = stGama0.t();
-  store = store.t();  
+  mat store = traj0;
+  mat stGama0 = beta0;
   store.insert_cols(0,TR);
   store.insert_cols(4,stGama0);
   vec gama1(store.n_rows,fill::zeros); 
