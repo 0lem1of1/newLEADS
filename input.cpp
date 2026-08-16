@@ -27,7 +27,7 @@ LEADS_Input :: LEADS_Input()
    
   //------------------------------------------------------------------------------------------ 
   // Particle Beam Parameters
-   NoBeamPart     = 1;     // Number of particles in beam
+   NoBeamPart     = 5000;     // Number of particles in beam
    ChargeParticle = -1.0;  // Charge of particle in units of 'e'
    MassParticle   = 1.0;   // Mass of particle in units of 'me' 
    GamaParticle   = 500.0; // Initial gama of the particle
@@ -85,6 +85,7 @@ LEADS_Input :: LEADS_Input()
    WriteSpatialFieldsProfile = true;
    RunFullSimulation = true;
    StoreTrajectories = false;   // false => skip NP*3*nT history cubes, final-state only
+   DumpStateBinary   = true;    // dump initial/final particle state to ./bench/*.bin
    at_time = 0;
    xy = 1; xz = 0; yz = 0; 
  }

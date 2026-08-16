@@ -1,4 +1,5 @@
 #include "leads.h"
+#include "leads_state.h"
 
 LEADS_Dynamics ::LEADS_Dynamics()
 {
@@ -45,7 +46,18 @@ void LEADS_Dynamics ::Run()
 {
   WriteLaserPulse();
   LEADS_Dynamics();
-  
+
+  if(in.DumpStateBinary)
+  {
+    if(system("mkdir -p ./bench") != 0) Print("WARNING: could not create ./bench");
+    if(LeadsWriteState("./bench/state_init.bin",NP,nT,dTau,t_shift,
+                       TR.memptr(),posi.memptr(),velo.memptr(),
+                       momt.memptr(),accl.memptr(),egama.memptr()))
+     { Print("Wrote ./bench/state_init.bin"); }
+    else
+     { Print("WARNING: failed to write ./bench/state_init.bin"); }
+  }
+
   Print("Starting interaction dynamics");
   auto PusherStart = high_resolution_clock::now();
   for(int i = 0; i < nT ; i++)
@@ -67,6 +79,17 @@ void LEADS_Dynamics ::Run()
   double PusherSeconds = duration_cast<duration<double>>(PusherEnd - PusherStart).count();
   VPrint("PusherLoopTime_sec",PusherSeconds);
   VPrint("FinalStateChecksum",accu(abs(posi)) + accu(abs(momt)));
+
+  if(in.DumpStateBinary)
+  {
+    if(LeadsWriteState("./bench/state_final_arma.bin",NP,nT,dTau,t_shift,
+                       TR.memptr(),posi.memptr(),velo.memptr(),
+                       momt.memptr(),accl.memptr(),egama.memptr()))
+     { Print("Wrote ./bench/state_final_arma.bin"); }
+    else
+     { Print("WARNING: failed to write ./bench/state_final_arma.bin"); }
+  }
+
   Print("Elec. trajectories calculated");
   
   WriteSelectedData();

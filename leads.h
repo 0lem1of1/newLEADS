@@ -34,6 +34,7 @@ public:
         
         bool WriteSpatialFieldsProfile,RunFullSimulation;
         bool StoreTrajectories;
+        bool DumpStateBinary;
         double at_time;
         int xy,xz,yz;
          
