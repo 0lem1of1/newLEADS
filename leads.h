@@ -1,5 +1,6 @@
 #include "leads_extra.h"
- 
+#include "leads_params.h"
+
 class LEADS_Input
 {
 public:
@@ -61,6 +62,7 @@ public:
 	LEADS_Input in;
 	LEADS_Laser();
 	void LaserProfile(double,rowvec,rowvec&,rowvec&);
+	void FillParams(LeadsParams&);
 	void Radial_Laser(double,rowvec,rowvec&,rowvec&);
 	void Paraxial_Laser(double,rowvec,rowvec&,rowvec&);
 	void CSPSW_Laser(double,rowvec,rowvec&,rowvec&);

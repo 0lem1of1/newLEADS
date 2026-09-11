@@ -252,5 +252,20 @@ void LEADS_Laser :: LaserProfile (double t,rowvec r,rowvec &E,rowvec &B)
  E(0) = Ex; E(1) = Ey; E(2) = Ez;
  B(0) = Bx; B(1) = By; B(2) = Bz;
  A(0) = Ax; A(1) = Ay; A(2) = Az;
- 
+
+}
+
+void LEADS_Laser :: FillParams(LeadsParams &p)
+{
+ p.k = k; p.Omega = Omega; p.Tau_FWHM = Tau_FWHM; p.a0 = a0; p.w0 = w0;
+ p.delta = delta; p.phase = phase; p.zr = zr; p.eps = eps; p.profile = profile;
+ p.DL_Const = DL_Const; p.E_Const = E_Const; p.M_Const = M_Const; p.L_Const = L_Const;
+
+ // Same expressions LaserProfile() uses inline, so the sidecar always
+ // matches what the field calculation actually used.
+ p.order = pow(2.0,profile);
+ p.alpha = profile > 0 ? pow(2.0,p.order)*log(2) / pow(Tau_FWHM,p.order) : 0;
+
+ p.model = model;
+ p.pola = pola;
 }
