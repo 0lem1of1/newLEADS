@@ -56,6 +56,14 @@ void LEADS_Dynamics ::Run()
      { Print("Wrote ./bench/state_init.bin"); }
     else
      { Print("WARNING: failed to write ./bench/state_init.bin"); }
+
+    LeadsParams p;
+    la.FillParams(p);
+    p.q_part = q_part; p.m_part = m_part; p.dTau = dTau;
+    if(LeadsWriteParams("./bench/params.bin",p))
+     { Print("Wrote ./bench/params.bin"); }
+    else
+     { Print("WARNING: failed to write ./bench/params.bin"); }
   }
 
   Print("Starting interaction dynamics");
