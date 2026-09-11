@@ -134,10 +134,12 @@ int main(int argc, char** argv)
 
         if(halfstep)
         {
+            // Stagger momentum HALF A STEP BEHIND position: step it backward
+            // to t=TR[0]-dTau/2 with a negative half-timestep, not forward.
             double Ex,Ey,Ez,Bx,By,Bz;
             laser_profile<0>(TR[0], x,y,z, p, Ex,Ey,Ez,Bx,By,Bz);
             double dummy_x=0, dummy_y=0, dummy_z=0, dummy_ax,dummy_ay,dummy_az;
-            boris_step(dTau/2.0, p.q_part, p.m_part,
+            boris_step(-dTau/2.0, p.q_part, p.m_part,
                        dummy_x,dummy_y,dummy_z, px,py,pz, vx,vy,vz, dummy_ax,dummy_ay,dummy_az,
                        Ex,Ey,Ez,Bx,By,Bz);
         }
