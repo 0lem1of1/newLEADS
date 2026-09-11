@@ -144,17 +144,8 @@ int main(int argc, char** argv)
                        Ex,Ey,Ez,Bx,By,Bz);
         }
 
-        double px_prev = px, py_prev = py, pz_prev = pz;
-        double vx_prev = vx, vy_prev = vy, vz_prev = vz;
-
         for(long i = 0; i < steps_to_run; i++)
         {
-            if(halfstep && i == steps_to_run - 1)
-            {
-                px_prev = px; py_prev = py; pz_prev = pz;
-                vx_prev = vx; vy_prev = vy; vz_prev = vz;
-            }
-
             double Ex,Ey,Ez,Bx,By,Bz;
             laser_profile<0>(TR[i], x,y,z, p, Ex,Ey,Ez,Bx,By,Bz);
             boris_step(dTau, p.q_part, p.m_part,
@@ -165,16 +156,31 @@ int main(int argc, char** argv)
         double gamma_final;
         if(halfstep)
         {
-            // Centered average (p_{n-1/2}+p_{n+1/2})/2 resynchronizes momentum
-            // to position's time, rather than a naive backward re-push.
-            px = 0.5*(px_prev + px);
-            py = 0.5*(py_prev + py);
-            pz = 0.5*(pz_prev + pz);
+            // After the loop, momentum is p_{n-1/2}: staggered dTau/2 BEHIND
+            // position's final time t_final (the initial backward half-kick's
+            // offset is preserved by every subsequent full-dTau step). Take
+            // one more forward half-kick from the final position to get
+            // p_{n+1/2} (dTau/2 AHEAD of t_final), then centered-average the
+            // two to resynchronize momentum onto position's actual time.
+            const double t_final = -t_shift + steps_to_run*dTau;
+            const double vx_before = vx, vy_before = vy, vz_before = vz;
+            const double px_before = px, py_before = py, pz_before = pz;
+
+            double Ex,Ey,Ez,Bx,By,Bz;
+            laser_profile<0>(t_final, x,y,z, p, Ex,Ey,Ez,Bx,By,Bz);
+            double dummy_x=0, dummy_y=0, dummy_z=0, dummy_ax,dummy_ay,dummy_az;
+            boris_step(dTau/2.0, p.q_part, p.m_part,
+                       dummy_x,dummy_y,dummy_z, px,py,pz, vx,vy,vz, dummy_ax,dummy_ay,dummy_az,
+                       Ex,Ey,Ez,Bx,By,Bz);
+
+            px = 0.5*(px_before + px);
+            py = 0.5*(py_before + py);
+            pz = 0.5*(pz_before + pz);
             gamma_final = sqrt(1 + (((px*px)+(py*py))+(pz*pz)));
             vx = px/gamma_final; vy = py/gamma_final; vz = pz/gamma_final;
-            ax = (vx - vx_prev)/dTau;
-            ay = (vy - vy_prev)/dTau;
-            az = (vz - vz_prev)/dTau;
+            ax = (vx - vx_before)/(dTau/2.0);
+            ay = (vy - vy_before)/(dTau/2.0);
+            az = (vz - vz_before)/(dTau/2.0);
         }
         else
         {
