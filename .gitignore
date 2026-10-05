@@ -1,0 +1,6 @@
+cuda/bench_cpu
+cuda/bench_gpu
+cuda/convtest
+cuda/statediff
+cuda/cplx_harness
+cuda/cplx_harness_nofma
