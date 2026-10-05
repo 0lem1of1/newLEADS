@@ -140,16 +140,46 @@ Facts verified against the source:
   `state_init.bin`, params patched to model=2, pola 0 and 1, 5000 particles x
   8001 steps): CPU-vs-GPU `statediff` L2 ~1e-10 on momt/egama, ~3e-13 on
   posi (same size as Model 0's CPU-vs-GPU gap); `--a0 0` free drift is
-  BIT-IDENTICAL CPU vs GPU; GPU 0.44 s vs CPU 10.6 s. **Weak evidence
-  only:** these particles sit far from the focus so the field barely acts
-  on them (checksum differs from the a0=0 run in the 5th digit). Still
-  needed: focal-region particles + Armadillo reference.
+  BIT-IDENTICAL CPU vs GPU; GPU 0.44 s vs CPU 10.6 s. (An earlier note
+  here called these particles "far-field"/weak evidence -- wrong: the
+  default bunch sits at z0=20, radius 1 in 1/k units, i.e. well inside the
+  focal region (w0=23.6, z0=277.6), and the field moves momt by up to 2e-2
+  vs a0=0 (L2 0.71), far above the 2e-10 CPU/GPU gap. So Model 0's
+  `state_init.bin` already is a valid focal-region test and the planned
+  separate focal-region particle file is not needed.)
+- **2026-10-05 -- Armadillo reference + validation (Model 2).** References
+  generated from a scratch copy of the repo with `PulseModel=2`,
+  `Polarization`=0 and 1 (`./leads 4`, ~25 s each), stored in
+  `TestCase/bench_model2_pola{0,1}/` (untracked, like the rest of
+  `TestCase/`). Model 0's `Tau_FWHM`, `a0`, `BeamWaist` and particle setup
+  unchanged. Results (NP=5000, 8001 steps):
+    - CPU vs Armadillo, pola=0: posi L2 2.1e-7 (max abs 2.8e-9), momt L2
+      5.4e-5 (max abs 1.3e-6), egama L2 6.9e-8. pola=1: 2.1e-7 / 4.6e-5 /
+      8.4e-8. Model 0's own gap vs Armadillo is posi 2.2e-7 / momt 5.8e-5 /
+      egama 1.1e-8, so Model 2 is at the same bar (~1e-9 abs posi, ~1e-6
+      abs momt).
+    - GPU vs Armadillo: identical to the CPU numbers to the printed digits;
+      GPU-vs-CPU gap ~1e-10 L2 (smoke test above).
+    - `convtest` (refine 1/2/4, no `--halfstep`, pola=1): posi 0.9994, velo
+      1.0000, momt 1.0000 -- first order, same as Model 0 without
+      `--halfstep` (see `KNOWN_ISSUES.md`). `--halfstep` not retested for
+      Model 2.
+    - Block-size sweep 32/64/128/256/512: BIT-IDENTICAL outputs. 1024 fails
+      to launch ("too many resources requested"): `BorisKernel<2>` uses 102
+      registers/thread (vs 68 for Model 0), so max block size for Model 2 is
+      512 (512 is also ~2x slower than 256: 0.82 s vs 0.42 s).
 
-Still open (assumed, to verify):
-- [ ] `statediff`'s actual tolerance value
-- [ ] Where `--halfstep` is implemented (`bench_cpu.cpp:135,157` — in the
-      driver loop, not the laser; looks fine)
-- [ ] How the initial particle distribution is chosen in the Armadillo run
+Resolved assumptions:
+- `statediff` has no built-in tolerance: it reports, and only gates when
+  given `--tol X` (relative). The working bar is the Model 0 baseline
+  quoted above.
+- `--halfstep` lives in the `bench_cpu` driver loop, not in the laser, so it
+  is model-agnostic (not retested for Model 2).
+- Initial distribution comes from `leads_init.cpp` (GSL Gaussian radius
+  `BunchRadius`, flat length `BunchLength`, centered at `z0`); default
+  bunch is already inside Model 2's focal region.
+- `pola=-1` (optional handedness check) was not run against Armadillo; the
+  field harness shows it identical to `pola=1`.
 
 ---
 
@@ -158,13 +188,13 @@ Still open (assumed, to verify):
 - [x] Sections 1-5 above decided
 - [x] `thrust::complex` vs `std::complex` agreement confirmed (no fallback
       needed) via `cuda/cplx_harness.cu`, before writing `laser_profile<2>()`
-- [ ] Model-2 reference data generated (`state_init.bin`/`params.bin`/
-      `state_final_arma.bin`)
+- [x] Model-2 reference data generated (`state_init.bin`/`params.bin`/
+      `state_final_arma.bin`), `TestCase/bench_model2_pola{0,1}/`
 - [x] `laser_profile<2>()` compiles under both g++ and nvcc
       (`LeadsComplex` in `leads_boris.cuh`)
 - [x] `bench_cpu`/`bench_gpu` dispatch to Model 2 correctly (generic lambda
       `run_cpu` in `bench_cpu.cpp`, `BorisKernel<Model>` + one `switch` in
       `bench_gpu.cu`; other models error out). Model 0 CPU output is
       bit-identical to its pre-refactor output.
-- [ ] Validated: free-drift (`--a0 0`), `statediff` vs Armadillo,
+- [x] Validated: free-drift (`--a0 0`), `statediff` vs Armadillo,
       `statediff` CPU-vs-GPU, `convtest` convergence order, block-size sweep
