@@ -77,6 +77,7 @@ LEADS_HD static inline double inv_gmpz(double px, double py, double pz)
 
 // One thread per particle. Reads/writes the SoA arrays with stride NP,
 // exactly like bench_cpu.cpp's indexing (posi[0*NP+part], posi[1*NP+part], ...).
+template<int Model>
 __global__ void BorisKernel(long NP, long steps_to_run,
                              double t_shift, double dTau,
                              double* posi, double* velo,
@@ -97,7 +98,7 @@ __global__ void BorisKernel(long NP, long steps_to_run,
     {
         const double t = -t_shift + i*dTau;
         double Ex,Ey,Ez,Bx,By,Bz;
-        laser_profile<0>(t, x,y,z, d_params, Ex,Ey,Ez,Bx,By,Bz);
+        laser_profile<Model>(t, x,y,z, d_params, Ex,Ey,Ez,Bx,By,Bz);
         boris_step(dTau, d_params.q_part, d_params.m_part,
                    x,y,z, px,py,pz, vx,vy,vz, ax,ay,az,
                    Ex,Ey,Ez,Bx,By,Bz);
@@ -198,9 +199,23 @@ int main(int argc, char** argv)
     const int grid_size = (int)((NP + block_size - 1) / block_size);
 
     CUDA_CHECK(cudaEventRecord(KernelStart));
-    BorisKernel<<<grid_size, block_size>>>(NP, steps_to_run, t_shift, dTau,
-                                            d_posi, d_velo, d_momt, d_accl,
-                                            d_egama, d_dgmpz);
+    // Dispatch on the field model once, before launch (no per-step branch).
+    switch(p.model)
+    {
+        case 0:
+            BorisKernel<0><<<grid_size, block_size>>>(NP, steps_to_run, t_shift, dTau,
+                                                       d_posi, d_velo, d_momt, d_accl,
+                                                       d_egama, d_dgmpz);
+            break;
+        case 2:
+            BorisKernel<2><<<grid_size, block_size>>>(NP, steps_to_run, t_shift, dTau,
+                                                       d_posi, d_velo, d_momt, d_accl,
+                                                       d_egama, d_dgmpz);
+            break;
+        default:
+            fprintf(stderr,"Unsupported PulseModel %d (ported: 0, 2)\n",(int)p.model);
+            return 1;
+    }
     CUDA_CHECK(cudaGetLastError());
     CUDA_CHECK(cudaEventRecord(KernelEnd));
     CUDA_CHECK(cudaEventSynchronize(KernelEnd));

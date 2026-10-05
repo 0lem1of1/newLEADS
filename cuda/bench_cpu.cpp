@@ -41,6 +41,7 @@
 #include <cstdlib>
 #include <cstring>
 #include <cmath>
+#include <type_traits>
 #include <vector>
 #include <chrono>
 #include "../leads_state.h"
@@ -123,78 +124,94 @@ int main(int argc, char** argv)
 
     auto PusherStart = std::chrono::high_resolution_clock::now();
 
-    for(long part = 0; part < NP; part++)
+    // Dispatch on the field model ONCE, outside the particle/step loops: the
+    // generic lambda is instantiated per model with M as a compile-time
+    // constant, so there is no per-step model branch.
+    auto run_cpu = [&](auto model_tag)
     {
-        double x = posi[0*NP+part], y = posi[1*NP+part], z = posi[2*NP+part];
-        double px = momt[0*NP+part], py = momt[1*NP+part], pz = momt[2*NP+part];
-        double vx = velo[0*NP+part], vy = velo[1*NP+part], vz = velo[2*NP+part];
-        double ax = accl[0*NP+part], ay = accl[1*NP+part], az = accl[2*NP+part];
-
-        const double gmpz0 = inv_gmpz(px,py,pz);
-
-        if(halfstep)
+        constexpr int M = decltype(model_tag)::value;
+        for(long part = 0; part < NP; part++)
         {
-            // Stagger momentum HALF A STEP BEHIND position: step it backward
-            // to t=TR[0]-dTau/2 with a negative half-timestep, not forward.
-            double Ex,Ey,Ez,Bx,By,Bz;
-            laser_profile<0>(TR[0], x,y,z, p, Ex,Ey,Ez,Bx,By,Bz);
-            double dummy_x=0, dummy_y=0, dummy_z=0, dummy_ax,dummy_ay,dummy_az;
-            boris_step(-dTau/2.0, p.q_part, p.m_part,
-                       dummy_x,dummy_y,dummy_z, px,py,pz, vx,vy,vz, dummy_ax,dummy_ay,dummy_az,
-                       Ex,Ey,Ez,Bx,By,Bz);
+            double x = posi[0*NP+part], y = posi[1*NP+part], z = posi[2*NP+part];
+            double px = momt[0*NP+part], py = momt[1*NP+part], pz = momt[2*NP+part];
+            double vx = velo[0*NP+part], vy = velo[1*NP+part], vz = velo[2*NP+part];
+            double ax = accl[0*NP+part], ay = accl[1*NP+part], az = accl[2*NP+part];
+
+            const double gmpz0 = inv_gmpz(px,py,pz);
+
+            if(halfstep)
+            {
+                // Stagger momentum HALF A STEP BEHIND position: step it backward
+                // to t=TR[0]-dTau/2 with a negative half-timestep, not forward.
+                double Ex,Ey,Ez,Bx,By,Bz;
+                laser_profile<M>(TR[0], x,y,z, p, Ex,Ey,Ez,Bx,By,Bz);
+                double dummy_x=0, dummy_y=0, dummy_z=0, dummy_ax,dummy_ay,dummy_az;
+                boris_step(-dTau/2.0, p.q_part, p.m_part,
+                           dummy_x,dummy_y,dummy_z, px,py,pz, vx,vy,vz, dummy_ax,dummy_ay,dummy_az,
+                           Ex,Ey,Ez,Bx,By,Bz);
+            }
+
+            for(long i = 0; i < steps_to_run; i++)
+            {
+                double Ex,Ey,Ez,Bx,By,Bz;
+                laser_profile<M>(TR[i], x,y,z, p, Ex,Ey,Ez,Bx,By,Bz);
+                boris_step(dTau, p.q_part, p.m_part,
+                           x,y,z, px,py,pz, vx,vy,vz, ax,ay,az,
+                           Ex,Ey,Ez,Bx,By,Bz);
+            }
+
+            double gamma_final;
+            if(halfstep)
+            {
+                // After the loop, momentum is p_{n-1/2}: staggered dTau/2 BEHIND
+                // position's final time t_final (the initial backward half-kick's
+                // offset is preserved by every subsequent full-dTau step). Take
+                // one more forward half-kick from the final position to get
+                // p_{n+1/2} (dTau/2 AHEAD of t_final), then centered-average the
+                // two to resynchronize momentum onto position's actual time.
+                const double t_final = -t_shift + steps_to_run*dTau;
+                const double vx_before = vx, vy_before = vy, vz_before = vz;
+                const double px_before = px, py_before = py, pz_before = pz;
+
+                double Ex,Ey,Ez,Bx,By,Bz;
+                laser_profile<M>(t_final, x,y,z, p, Ex,Ey,Ez,Bx,By,Bz);
+                double dummy_x=0, dummy_y=0, dummy_z=0, dummy_ax,dummy_ay,dummy_az;
+                boris_step(dTau/2.0, p.q_part, p.m_part,
+                           dummy_x,dummy_y,dummy_z, px,py,pz, vx,vy,vz, dummy_ax,dummy_ay,dummy_az,
+                           Ex,Ey,Ez,Bx,By,Bz);
+
+                px = 0.5*(px_before + px);
+                py = 0.5*(py_before + py);
+                pz = 0.5*(pz_before + pz);
+                gamma_final = sqrt(1 + (((px*px)+(py*py))+(pz*pz)));
+                vx = px/gamma_final; vy = py/gamma_final; vz = pz/gamma_final;
+                ax = (vx - vx_before)/(dTau/2.0);
+                ay = (vy - vy_before)/(dTau/2.0);
+                az = (vz - vz_before)/(dTau/2.0);
+            }
+            else
+            {
+                gamma_final = sqrt(1 + (((px*px)+(py*py))+(pz*pz)));
+            }
+
+            posi[0*NP+part]=x;  posi[1*NP+part]=y;  posi[2*NP+part]=z;
+            velo[0*NP+part]=vx; velo[1*NP+part]=vy; velo[2*NP+part]=vz;
+            momt[0*NP+part]=px; momt[1*NP+part]=py; momt[2*NP+part]=pz;
+            accl[0*NP+part]=ax; accl[1*NP+part]=ay; accl[2*NP+part]=az;
+            egama[part] = gamma_final;
+
+            double dgmpz = fabs(inv_gmpz(px,py,pz) - gmpz0);
+            if(dgmpz > max_dgmpz) max_dgmpz = dgmpz;
         }
+    };
 
-        for(long i = 0; i < steps_to_run; i++)
-        {
-            double Ex,Ey,Ez,Bx,By,Bz;
-            laser_profile<0>(TR[i], x,y,z, p, Ex,Ey,Ez,Bx,By,Bz);
-            boris_step(dTau, p.q_part, p.m_part,
-                       x,y,z, px,py,pz, vx,vy,vz, ax,ay,az,
-                       Ex,Ey,Ez,Bx,By,Bz);
-        }
-
-        double gamma_final;
-        if(halfstep)
-        {
-            // After the loop, momentum is p_{n-1/2}: staggered dTau/2 BEHIND
-            // position's final time t_final (the initial backward half-kick's
-            // offset is preserved by every subsequent full-dTau step). Take
-            // one more forward half-kick from the final position to get
-            // p_{n+1/2} (dTau/2 AHEAD of t_final), then centered-average the
-            // two to resynchronize momentum onto position's actual time.
-            const double t_final = -t_shift + steps_to_run*dTau;
-            const double vx_before = vx, vy_before = vy, vz_before = vz;
-            const double px_before = px, py_before = py, pz_before = pz;
-
-            double Ex,Ey,Ez,Bx,By,Bz;
-            laser_profile<0>(t_final, x,y,z, p, Ex,Ey,Ez,Bx,By,Bz);
-            double dummy_x=0, dummy_y=0, dummy_z=0, dummy_ax,dummy_ay,dummy_az;
-            boris_step(dTau/2.0, p.q_part, p.m_part,
-                       dummy_x,dummy_y,dummy_z, px,py,pz, vx,vy,vz, dummy_ax,dummy_ay,dummy_az,
-                       Ex,Ey,Ez,Bx,By,Bz);
-
-            px = 0.5*(px_before + px);
-            py = 0.5*(py_before + py);
-            pz = 0.5*(pz_before + pz);
-            gamma_final = sqrt(1 + (((px*px)+(py*py))+(pz*pz)));
-            vx = px/gamma_final; vy = py/gamma_final; vz = pz/gamma_final;
-            ax = (vx - vx_before)/(dTau/2.0);
-            ay = (vy - vy_before)/(dTau/2.0);
-            az = (vz - vz_before)/(dTau/2.0);
-        }
-        else
-        {
-            gamma_final = sqrt(1 + (((px*px)+(py*py))+(pz*pz)));
-        }
-
-        posi[0*NP+part]=x;  posi[1*NP+part]=y;  posi[2*NP+part]=z;
-        velo[0*NP+part]=vx; velo[1*NP+part]=vy; velo[2*NP+part]=vz;
-        momt[0*NP+part]=px; momt[1*NP+part]=py; momt[2*NP+part]=pz;
-        accl[0*NP+part]=ax; accl[1*NP+part]=ay; accl[2*NP+part]=az;
-        egama[part] = gamma_final;
-
-        double dgmpz = fabs(inv_gmpz(px,py,pz) - gmpz0);
-        if(dgmpz > max_dgmpz) max_dgmpz = dgmpz;
+    switch(p.model)
+    {
+        case 0: run_cpu(std::integral_constant<int,0>{}); break;
+        case 2: run_cpu(std::integral_constant<int,2>{}); break;
+        default:
+            fprintf(stderr,"Unsupported PulseModel %d (ported: 0, 2)\n",(int)p.model);
+            return 1;
     }
 
     auto PusherEnd = std::chrono::high_resolution_clock::now();

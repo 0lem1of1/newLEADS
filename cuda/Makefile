@@ -19,6 +19,15 @@ bench_cpu: bench_cpu.cpp leads_boris.cuh ../leads_state.h ../leads_params.h
 bench_gpu: bench_gpu.cu leads_boris.cuh ../leads_state.h ../leads_params.h
 	$(NVCC) $(NVCCFLAGS) -o $@ bench_gpu.cu
 
+# Model 2 host-vs-device complex-arithmetic agreement harness. The _nofma
+# variant disables FMA contraction on both sides (fallback step 1 in
+# MODEL2_PORT_PLAN.md).
+cplx_harness: cplx_harness.cu ../leads_params.h
+	$(NVCC) $(NVCCFLAGS) -o $@ cplx_harness.cu
+
+cplx_harness_nofma: cplx_harness.cu ../leads_params.h
+	$(NVCC) $(NVCCFLAGS) -fmad=false -Xcompiler -ffp-contract=off -o $@ cplx_harness.cu
+
 convtest: convtest.cpp
 	$(CXX) $(CXXFLAGS) -o $@ convtest.cpp
 

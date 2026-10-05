@@ -30,16 +30,28 @@
 */
 
 #include <cmath>
+#include <complex>
 #include "../leads_params.h"
 
 #ifdef __CUDACC__
+#include <thrust/complex.h>
 #define LEADS_HD __host__ __device__
+// Model 2 needs a complex type usable on the device: thrust::complex under
+// nvcc, std::complex under g++ (verified equivalent to <= 1e-13 of peak field
+// by cuda/cplx_harness.cu -- see MODEL2_PORT_PLAN.md).
+typedef thrust::complex<double> LeadsComplex;
+LEADS_HD inline LeadsComplex leads_csqrt(const LeadsComplex& z) { return thrust::sqrt(z); }
+LEADS_HD inline LeadsComplex leads_cexp (const LeadsComplex& z) { return thrust::exp(z); }
 #else
 #define LEADS_HD
+typedef std::complex<double> LeadsComplex;
+inline LeadsComplex leads_csqrt(const LeadsComplex& z) { return std::sqrt(z); }
+inline LeadsComplex leads_cexp (const LeadsComplex& z) { return std::exp(z); }
 #endif
 
 // Primary template intentionally left undefined: only MODEL==0 (Plain Wave)
-// is ported. Instantiating any other MODEL is a link-time error by design.
+// and MODEL==2 (focused 3D pulse) are ported. Instantiating any other MODEL
+// is a link-time error by design.
 template<int MODEL>
 LEADS_HD void laser_profile(double t, double x, double y, double z,
                              const LeadsParams &p,
@@ -81,6 +93,54 @@ LEADS_HD inline void laser_profile<0>(double t, double /*x*/, double /*y*/, doub
     By = -B0 * delta * g_eta * Deta_Dz
              * ( (1 + d_feta)*sin(eta+feta) + derivative * cos(eta+feta) );
     Bz = 0.0;
+}
+
+// Model 2: tightly focused 3D pulse (complex-source-point construction),
+// transcribed from leads_laser.cpp case 2 with its operation order kept.
+// x,y,z are the normalized position (x1,y1,z1 -- no L_Const), `pola` is used
+// as a continuous ellipticity parameter (zeta2), and there is no
+// E_Const/M_Const normalization. Ax/Ay/Az (always 0 in case 2) are not
+// returned.
+template<>
+LEADS_HD inline void laser_profile<2>(double t, double x, double y, double z,
+                                       const LeadsParams &p,
+                                       double &Ex, double &Ey, double &Ez,
+                                       double &Bx, double &By, double &Bz)
+{
+    typedef LeadsComplex Complex;
+    const Complex iota0(0,1);
+
+    const double E0 = p.a0;
+    double z0 = p.k*p.zr;
+    double t0 = p.phase;
+    double zeta2 = (double)p.pola;
+    double T = p.Tau_FWHM/sqrt(8*log(2.0));
+    Complex Rc = leads_csqrt(Complex(x*x + y*y,0) + (z + iota0*z0)*(z + iota0*z0));
+    if(Rc.imag() < 0) Rc = -Rc;
+    Complex tc = (t - t0 + iota0*z0);
+    Complex tau = (tc - Rc);
+    Complex p0 = (z0 * E0)/sqrt((1 - 1/z0 + 1/(T*T) + 1/(z0*z0)) * (1 - 1/z0 + 1/(T*T)));
+    double phi0 = 0;
+    Complex phase0 = leads_cexp(iota0*(tau + phi0));
+    Complex P_0 = p0*leads_cexp(-0.5*(tau*tau/T/T)) * phase0;
+    Complex Zc = z + iota0*z0;
+
+    Complex f = (1.0 + (iota0*tau)/(T*T))*(1.0 + (iota0*tau)/(T*T))
+                - (1.0/(Rc*Rc))*(1.0 - tc*Rc/(T*T) + iota0*Rc);
+    Complex g = -f + (2.0/(Rc*Rc))*(1.0 - tau*Rc/(T*T) + iota0*Rc);
+    Complex hf = f + 1.0/(Rc*Rc);
+
+    Complex dummyEx = (P_0)/(Rc*sqrt(1.0+zeta2*zeta2))*(f + g*x*(x + iota0*zeta2*y)/(Rc*Rc));
+    Complex dummyEy = (P_0)/(Rc*sqrt(1.0+zeta2*zeta2))*(iota0*f*zeta2 + g*y*(x + iota0*zeta2*y)/(Rc*Rc));
+    Complex dummyEz = (P_0)/(Rc*sqrt(1.0+zeta2*zeta2))*(g*Zc*(x + iota0*zeta2*y)/(Rc*Rc));
+
+    double factor = 1;
+    Complex dummyBx = (P_0*hf)/(Rc*Rc*sqrt(1.0+zeta2*zeta2)*factor)*(-iota0*zeta2*Zc);
+    Complex dummyBy = (P_0*hf)/(Rc*Rc*sqrt(1.0+zeta2*zeta2)*factor)*(Zc);
+    Complex dummyBz = (P_0*hf)/(Rc*Rc*sqrt(1.0+zeta2*zeta2)*factor)*(iota0*zeta2*x - y);
+
+    Ex = dummyEx.real(); Ey = dummyEy.real(); Ez = dummyEz.real();
+    Bx = dummyBx.real(); By = dummyBy.real(); Bz = dummyBz.real();
 }
 
 // Raw Boris push (radiation reaction off), transcribed scalar-for-scalar from
