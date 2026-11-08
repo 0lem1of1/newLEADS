@@ -31,8 +31,14 @@ LEADS_Dynamics ::LEADS_Dynamics()
  }
  traj0 = zeros(nT,3);
  beta0 = zeros(nT,3);
- TR = linspace(-t_shift,t_shift,nT);
-  
+ // Time axis must advance by exactly dTau per step, the same step the pusher
+ // takes (rp += beta*dTau). linspace(-t_shift,t_shift,nT) has step
+ // 2*t_shift/(nT-1) ~ dTau/beta, which corrupts the retarded time t - n.r
+ // by ~1/(1-beta) and puts the Thomson peak at ~0.5x theory. The window now
+ // ends at -t_shift + (nT-1)*dTau, up to one dTau short of +t_shift.
+ TR = zeros(nT);
+ for(int i = 0; i < nT; i++) TR(i) = -t_shift + i*dTau;
+
  th_st = in.DetecThetaStart * pi/180.0;
  th_en = in.DetecThetaEnd   * pi/180.0; 
  dTh   = in.DetecDTheta     * pi/180.0;
