@@ -76,7 +76,8 @@ LEADS_HD inline void laser_profile<0>(double t, double /*x*/, double /*y*/, doub
     const double order = p.order;
     const double alpha = p.alpha;
     const double g_eta      = exp(-alpha * pow(fabs(eta), order));
-    const double derivative = alpha * order * pow(fabs(eta), order - 1);
+    // sign(eta) from d/deta |eta|^n, so that E = -dA/dt (matches leads_laser.cpp)
+    const double derivative = alpha * order * pow(fabs(eta), order - 1) * copysign(1.0, eta);
 
     const double delta   = p.delta;
     const double Deta_Dt = 1.0;

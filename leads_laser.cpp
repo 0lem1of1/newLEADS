@@ -43,7 +43,8 @@ void LEADS_Laser :: LaserProfile (double t,rowvec r,rowvec &E,rowvec &B)
  order = pow(2.0,profile); 
  alpha = profile > 0 ? pow(2.0,order)*log(2) / pow(Tau_FWHM,order) : 0;  //
  g_eta = exp(-alpha*pow( abs(eta),order)) ;
- derivative = alpha * order * pow( abs(eta),order-1) ;
+ // d/deta of exp(-alpha*|eta|^n) carries sign(eta); without it E != -dA/dt
+ derivative = alpha * order * pow( abs(eta),order-1) * copysign(1.0,eta) ;
  
  double feta,d_feta; // for chirping function if later would like to introduce  
  feta = d_feta = 0;

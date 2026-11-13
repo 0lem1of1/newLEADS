@@ -82,10 +82,81 @@ before it (including `TestCase/bench/state_final_arma.bin` and the L2 gaps
 against Armadillo quoted in the reports) used the old grid and must be
 regenerated. Those gaps should drop to zero.
 
+### 2. Model 0 envelope derivative lacked `sign(eta)`
+
+**Where:** `leads_laser.cpp:46-47`, and its copy in `cuda/leads_boris.cuh:79-80`.
+Only Model 0 (plane wave) uses this term.
+
+**Problem.** The field is meant to be `E = -dA/dt` with
+`A = a0 * g(eta) * cos(eta)` (and `sin` for the other component), where
+`eta = t - z + phase` and `g = exp(-alpha*|eta|^n)`. The code wrote the
+envelope term as
+
+```cpp
+derivative = alpha * order * pow( abs(eta),order-1) ;   // = -g'/g only for eta > 0
+```
+
+but `d/deta |eta|^n = n*|eta|^(n-1)*sign(eta)`. For `eta < 0` (the leading half
+of the pulse) the term had the wrong sign. E and B shared the error, so `B = z x E`
+and the invariant `gamma - p_z` still held, which hid it. The field was no
+longer the derivative of a bounded potential, so `int E dt != 0` and the pulse
+left a net transverse kick. Theory says a plane-wave pulse leaves zero net
+transverse momentum.
+
+The CUDA port copied the formula exactly, so CPU/GPU agreement could not
+detect it, and neither could self-convergence.
+
+**Fix.**
+
+```cpp
+derivative = alpha * order * pow( abs(eta),order-1) * copysign(1.0,eta) ;
+```
+
+The same change was made in `laser_profile<0>`, so LEADS and the harness still
+match. When `PulseProfile = 0` (infinite plane wave), `alpha = 0` and the term
+is zero either way.
+
+**How it was checked** (scratch builds of the tree before and after the fix,
+2026-11-13).
+
+- *Against theory: net impulse.* 20 electrons, gamma = 500, head-on into an
+  a0 = 10 pulse, with `z0 = 2.5*Tau_FWHM`, so the envelope is about 1e-30 at
+  both ends of the window. The table gives the residual `max|p_x(final) -
+  p_x(0)|/a0`:
+
+  | Pulse (cycles) | Linear before | Linear after | Circular before | Circular after |
+  |---|---|---|---|---|
+  | 1 | 0.46 | 2.2e-7 | 0.33 | 5.6e-8 |
+  | 2 | 0.079 | 1.2e-8 | 0.056 | 2.8e-9 |
+  | 4 | 0.018 | 2.2e-14 | 0.013 | 1.2e-14 |
+  | 10 | 0.0028 | 3.5e-14 | 0.0020 | 3.7e-14 |
+
+  The 1-cycle leftover halves each time `dTau` is halved (2.2e-7, 1.1e-7,
+  5.4e-8, 2.7e-8 at `--refine` 1, 2, 4, 8). It is the pusher's first-order time
+  error (items 3 and 4), not the field. After the fix, `gamma` returns to its
+  initial value to 1e-10, and before the fix it was off by up to 2e-5.
+  `gamma - p_z` is conserved to 1e-10 or better in both builds.
+- *Against the harness.* Reference case (5000 particles, 4 cycles, a0 = 10):
+  Armadillo vs `bench_cpu` is `BIT-IDENTICAL`. For `bench_cpu` vs `bench_gpu`,
+  the L2 gap is posi 2.6e-13 and momt 2.1e-10, the same as before the fix (2.6e-13
+  and 2.4e-10). The worst relative error rose (velo 1e-8, was 7e-13) because
+  the final transverse velocity is now close to zero. Absolute errors did not
+  change.
+- *Model 2 is untouched.* LEADS before vs after, Model 2 with `pola` 0 and 1, is
+  `BIT-IDENTICAL`.
+- *Convergence unchanged.* `convtest` order is 1.00 on posi/velo/momt before and
+  after. That is the known first-order result (items 3 and 4).
+- `validation/thomson_compton_check.py` was not rerun. It uses a0 = 0.01 and
+  10 cycles, where the old residual kick is about 3e-3 of a0.
+
+**After pulling this change.** Every Model 0 result changes. In the reference
+case, Armadillo before vs after differs by up to 0.18 in `momt` and 7.6e-3 in
+`posi`. Regenerate `TestCase/bench/state_final_arma.bin` and any Model 0 numbers
+quoted in the reports. Model 2 data is still valid.
+
 ## Known, not yet fixed
 
 | # | Problem | Where |
 |---|---|---|
-| 2 | Model 0 envelope derivative lacks `sign(eta)`, so E != -dA/dt and the pulse leaves a net impulse | `leads_laser.cpp:46`, copied into `cuda/leads_boris.cuh` |
 | 3 | Boris computes gamma from the momentum before the half E-kick instead of from `UM` | `leads_traj.cpp:20-23`, `cuda/leads_boris.cuh:167-170` |
 | 4 | `--halfstep` resync kicks by `dTau/2` instead of `dTau` | `cuda/bench_cpu.cpp:179` |
