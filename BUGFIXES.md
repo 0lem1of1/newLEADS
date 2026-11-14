@@ -133,7 +133,7 @@ is zero either way.
 
   The 1-cycle leftover halves each time `dTau` is halved (2.2e-7, 1.1e-7,
   5.4e-8, 2.7e-8 at `--refine` 1, 2, 4, 8). It is the pusher's first-order time
-  error (items 3 and 4), not the field. After the fix, `gamma` returns to its
+  error (item 3, fixed below), not the field. After the fix, `gamma` returns to its
   initial value to 1e-10, and before the fix it was off by up to 2e-5.
   `gamma - p_z` is conserved to 1e-10 or better in both builds.
 - *Against the harness.* Reference case (5000 particles, 4 cycles, a0 = 10):
@@ -154,9 +154,76 @@ case, Armadillo before vs after differs by up to 0.18 in `momt` and 7.6e-3 in
 `posi`. Regenerate `TestCase/bench/state_final_arma.bin` and any Model 0 numbers
 quoted in the reports. Model 2 data is still valid.
 
+### 3. The Boris rotation used gamma from before the half E-kick
+
+**Where:** `leads_traj.cpp:19-31` and `cuda/leads_boris.cuh` `boris_step`.
+
+**Problem.** The magnetic rotation is scaled by `1/gamma`, which should be the
+mid-step value: `gamma = sqrt(1+|UM|^2)` with `UM = P + del_s*E` (Boris 1970).
+The rotation keeps `|UM|` fixed, so this is also the value after the rotation.
+LEADS took `gamma` from `P`, the momentum at the start of the step. That is off
+by about `(q*dTau/2)(u.E)/gamma`, so every rotation had an O(dTau) relative
+error. The result was a first-order scheme. It only matters where E and B are
+both nonzero. Radiation-reaction terms use the separate `gamaOld`, which is
+unchanged.
+
+**Fix.** Compute `UM` first, then `gamaM = sqrt(1 + cdot(UM,UM))`, and use it
+for `del`. `boris_step` makes the same change with the same operation order as
+`cdot`, so Armadillo and the harness still match.
+
+**How it was checked** (scratch builds before and after, 2026-11-15; "before"
+is the tree with fixes 1 and 2).
+
+- *Net impulse.* Same test as item 2 (20 electrons, gamma = 500, a0 = 10,
+  z0 = 2.5*Tau_FWHM). `max|dp_x|/a0` is the sideways momentum left over; it
+  should be zero:
+
+  | Case | Before, refine 1, 2, 4, 8 | After, refine 1, 2, 4, 8 |
+  |---|---|---|
+  | Linear, 1 cycle | 2.2e-7, 1.1e-7, 5.4e-8, 2.7e-8 | 4e-15, 6e-15, 6e-15, 1e-14 |
+  | Linear, 2 cycles | 1.2e-8, 5.7e-9, 2.9e-9, 1.4e-9 | 1e-14, 1e-14, 2e-14, 2e-14 |
+  | Circular, 1 cycle | 5.6e-8, 2.8e-8, 1.4e-8, 7.0e-9 | 3e-15, 4e-15, 7e-15, 1e-14 |
+  | Circular, 2 cycles | 2.8e-9, 1.4e-9, 6.9e-10, 3.5e-10 | 7e-15, 8e-15, 9e-15, 2e-14 |
+
+  The leftover halves with each refinement before the fix (first order) and
+  is at round-off after it. So this bug was the whole of the item-2 leftover.
+  The 4-cycle cases were already at round-off.
+- *Convergence (`convtest --order 2 --tol 0.25`).* Without `--halfstep`, the
+  order on posi/velo/momt is still 1.00 after the fix, for Model 0 and for
+  Model 2 with `pola` 0 and 1. The final momentum is staggered half a step
+  behind the position, and that offset differs on every grid. That is item 4,
+  and the fix to item 3 cannot remove it. To separate the two, item 4's
+  `bench_cpu.cpp:179` kick was changed from `dTau/2.0` to `dTau` in a scratch
+  copy only (the repo is unchanged), run with `--halfstep`:
+
+  | Case | Before: posi, velo, momt | After: posi, velo, momt |
+  |---|---|---|
+  | Model 0, reference | 2.03, 1.45, 1.06 | 2.00, 2.00, 2.00 (PASS) |
+  | Model 2, `pola` 0 | 1.99, 1.64, 1.29 | 2.00, 2.00, 2.00 (PASS) |
+  | Model 2, `pola` 1 | not run | 2.00, 2.00, 2.00 (PASS) |
+
+  Neither fix alone gives order 2 on velo and momt. `egama` is not gated, and
+  its error is now near round-off (5e-10), so its order is not meaningful.
+- *Against the harness.* Armadillo vs `bench_cpu` is `BIT-IDENTICAL` for the
+  Model 0 reference case. For Model 2 the L2 gap is posi 4e-14 and momt 3e-13
+  (`pola` 0), as it was before. `bench_cpu` vs `bench_gpu` has L2 gaps of about
+  2.6e-13 (posi) and 2.2e-10 (momt) for Model 0, and 1e-13 and 9e-11 for Model 2.
+  Both are the same as before.
+- *Plane-wave invariant.* `gamma - p_z` is conserved to 3e-14 (relative) in the
+  Model 0 reference case.
+- *Radiation reaction.* LEADS with `RadiationReaction = true` and `RRModel`
+  0-3 (20 particles, 2-cycle pulse) runs and gives finite output. Momentum
+  differs from before by up to 1.2e-7, which is about the O(dTau) size
+  expected. The harness has no radiation reaction, so this only tests LEADS.
+
+**After pulling this change.** Model 0 and Model 2 results both change slightly.
+In the reference case Armadillo before vs after differs by up to 8.4e-8 in
+`momt` and 3.4e-9 in `posi`, and in Model 2 by up to 1.0e-7 and 5.7e-9. Regenerate
+`TestCase/bench/state_final_arma.bin` and the reference data for the reports.
+Quoted CPU/GPU and Armadillo gaps will change at the 1e-7 level in `momt`.
+
 ## Known, not yet fixed
 
 | # | Problem | Where |
 |---|---|---|
-| 3 | Boris computes gamma from the momentum before the half E-kick instead of from `UM` | `leads_traj.cpp:20-23`, `cuda/leads_boris.cuh:167-170` |
 | 4 | `--halfstep` resync kicks by `dTau/2` instead of `dTau` | `cuda/bench_cpu.cpp:179` |

@@ -20,12 +20,16 @@ void LEADS_Dynamics ::CalForceMovePart(double tr,int i_p)
   double gamma = sqrt(1 + cdot(P,P));
   double gamaOld = gamma;
   double del_s = (q_part/m_part) * dTau/2.0;
-  double del = del_s/gamma;
+  rowvec UM = P + del_s * E ;
+  // The rotation uses gamma at the mid-step, i.e. from UM (after the first half
+  // E-kick); the rotation itself leaves |UM| unchanged (Boris 1970; Birdsall &
+  // Langdon). gamma from P (start of step) made the scheme first order.
+  double gamaM = sqrt(1 + cdot(UM,UM));
+  double del = del_s/gamaM;
   double del2 = del*del;
   double B2 = cdot(B,B);
   double term1 = (1 - del2*B2) / (1 + del2*B2);
   double term2 =  2*del / (1 + del2*B2);
-  rowvec UM = P + del_s * E ;
   rowvec UxB = Cross(UM,B);
   double udb = cdot(UM,B);
   rowvec UP = term1 * UM + term2 * UxB + term2 * del * udb * B;

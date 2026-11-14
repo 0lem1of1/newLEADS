@@ -165,19 +165,22 @@ LEADS_HD inline void boris_step(
 
     double Px = px, Py = py, Pz = pz;
 
-    double gamma = sqrt(1 + (((Px*Px) + (Py*Py)) + (Pz*Pz)));
-
     const double del_s = (q_part/m_part) * dTau/2.0;
-    const double del   = del_s/gamma;
-    const double del2  = del*del;
-    const double B2    = ((Bx*Bx) + (By*By)) + (Bz*Bz);
-    const double term1 = (1 - del2*B2) / (1 + del2*B2);
-    const double term2 = 2*del / (1 + del2*B2);
 
     // UM = P + del_s * E
     const double UMx = Px + del_s*Ex;
     const double UMy = Py + del_s*Ey;
     const double UMz = Pz + del_s*Ez;
+
+    // The rotation uses gamma at the mid-step, i.e. from UM (as in
+    // leads_traj.cpp); gamma from the start-of-step P made the scheme 1st order.
+    const double gamma_m = sqrt(1 + (((UMx*UMx) + (UMy*UMy)) + (UMz*UMz)));
+
+    const double del   = del_s/gamma_m;
+    const double del2  = del*del;
+    const double B2    = ((Bx*Bx) + (By*By)) + (Bz*Bz);
+    const double term1 = (1 - del2*B2) / (1 + del2*B2);
+    const double term2 = 2*del / (1 + del2*B2);
 
     // UxB = Cross(UM, B), matching leads_extra.h's Cross()
     const double UxBx = UMy*Bz - UMz*By;
@@ -200,7 +203,7 @@ LEADS_HD inline void boris_step(
     // Raw pusher (RRFLAG == 0): pbeta = P, no radiation-reaction correction.
     px = Px; py = Py; pz = Pz;
 
-    gamma = sqrt(1 + (((px*px) + (py*py)) + (pz*pz)));
+    const double gamma = sqrt(1 + (((px*px) + (py*py)) + (pz*pz)));
 
     vx = px/gamma; vy = py/gamma; vz = pz/gamma;
 
