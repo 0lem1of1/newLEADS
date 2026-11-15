@@ -1,65 +1,58 @@
 # Known issues
 
-## `bench_cpu --halfstep`: velo/momt/egama stuck at 1st-order convergence
+## `bench_cpu --halfstep`: velo/momt were stuck at 1st-order convergence (RESOLVED)
 
-**Status:** unresolved, deferred. Not blocking the CPU/GPU port itself --
-`--halfstep` is a diagnostic extra on top of the raw pusher, not required for
-matching Armadillo.
+**Status:** resolved. See `../BUGFIXES.md`, items 3 and 4.
 
-**Symptom:** with `--halfstep` off, `convtest`'s 3-grid Richardson test shows
-`posi`, `velo`, and `momt` all converging at observed order ~1.0 (halving the
-timestep only halves the error, not quarters it) -- expected, since
-`leads_init.cpp` sets position and momentum at the same instant instead of
-staggering them the half-step apart a leapfrog scheme wants.
+**Symptom (old).** With `--halfstep` off, `convtest`'s 3-grid Richardson test
+shows `posi`, `velo`, and `momt` all converging at observed order ~1.0, as
+expected: `leads_init.cpp` sets position and momentum at the same instant
+instead of staggering them half a step apart as a leapfrog scheme wants.
+`--halfstep` staggers momentum backward before the main loop and resynchronizes
+it at the end. That took `posi` to order 2, but `velo` and `momt` stayed at ~1.
 
-`--halfstep` is meant to fix this: stagger momentum backward by a half-step
-before the main loop, run the loop as normal, then resynchronize momentum
-back onto position's time at the end via a centered average of the two
-half-steps bracketing it.
+**Cause.** Two independent errors, and both had to be fixed:
 
-**What's been tried:**
+1. *The Boris rotation used gamma from the start of the step* instead of from
+   `UM` (the momentum after the first half E-kick). That left an O(dTau)
+   error in every rotation. Fixed in `leads_traj.cpp` and `leads_boris.cuh`
+   (`BUGFIXES.md` item 3).
+2. *The end-of-loop resync kicked by `dTau/2`, not `dTau`.* After the loop,
+   momentum is p_{n-1/2}. A kick of `dTau/2` reaches `t_final`, not
+   `t_final + dTau/2`, so averaging with p_{n-1/2} landed at `t_final - dTau/4`,
+   a fixed offset that is first order. The kick is now `dTau`, giving p_{n+1/2},
+   and the average lands on `t_final` (`BUGFIXES.md` item 4).
 
-1. First cut had the initial half-kick's *direction* backwards (pushed
-   momentum forward in time instead of backward). Fixing the sign alone took
-   `posi`'s observed order from 1.00 -> **1.89**, matching prior recollection
-   of this fix almost exactly. Confirms the backward initial half-kick is
-   correct.
-2. `velo`/`momt`/`egama` did NOT follow -- stayed at order ~1.0 even after
-   reworking the end-of-loop resync to do a proper extra forward half-kick
-   (evaluating the field at the final position/time) followed by a true
-   centered average `(p_{n-1/2}+p_{n+1/2})/2`, rather than the original,
-   sloppier attempt (averaging two already-computed full-step values at the
-   wrong loop index). The error *magnitude* dropped meaningfully from that
-   rework (momt's coarse-vs-medium L2 diff: 3.98e-3 -> 7.78e-4), so something
-   real improved, but the *convergence rate* did not.
+Either fix alone leaves momentum near order 1. `convtest` orders with
+`--halfstep` on the Model 0 reference case (refine 1/2/4):
 
-**Why this is puzzling:** position is only touched by the initial half-kick
-(the resync logic runs after position is already finalized for the step), so
-position's jump to order 1.89 shows the initial backward half-kick is
-genuinely correct. Momentum's own per-step update uses that same,
-already-validated Boris kick math, so by the same leapfrog-staggering theory
-that explains position's improvement, momentum's own natural (staggered)
-values should also be 2nd-order accurate at their half-integer grid points --
-and averaging two 2nd-order-accurate points bracketing the target time should
-still be 2nd-order. On paper momentum should have improved alongside
-position. It didn't.
+| Fixes applied | posi | velo | momt |
+|---|---|---|---|
+| Neither (as first recorded here) | 1.89 | about 1.0 | about 1.0 |
+| Item 3 only | 2.00 | 0.999 | 0.999 |
+| Item 4 only | 2.03 | 1.45 | 1.06 |
+| Both | 2.00 | 2.00 | 2.00 |
 
-**Open hypotheses, untested:**
-- The end-of-loop resync has a subtler bug not yet found.
-- Reverse-integrating the Boris rotation via a negative `dTau` argument to
-  `boris_step()` is a reasonable approximation for position (confirmed above)
-  but not exact enough for momentum specifically.
-- The original (lost) implementation used a genuinely different resync
-  technique than what's been reconstructed here from memory.
+The Model 2 results are in `BUGFIXES.md`.
 
-**Where the code stands right now:** `cuda/bench_cpu.cpp`'s `--halfstep`
-path implements attempt #2 above (the "proper" resync). It's left in this
-state -- not reverted -- since it's a strict improvement in error magnitude
-over attempt #1 even though the order-2 goal for velo/momt isn't met yet.
+**The earlier hypotheses.**
+- *A subtler bug in the resync:* yes, the `dTau/2` kick above.
+- *Reverse-integrating the rotation with a negative `dTau` is not exact enough:*
+  no. Boris is time-reversible, and the backward initial kick was correct (it
+  took `posi` to order 2.00).
+- *The lost original used a different technique:* not needed.
 
-**To pick this back up:** reproduce with
+**What is still first order.** Only the `--halfstep` path is staggered.
+LEADS itself, `bench_gpu`, and `bench_cpu` without `--halfstep` still start
+momentum at t0 rather than t0 - dTau/2, and report it half a step behind
+position. Their results are therefore first order wherever the field at the ends
+of the window is not negligible (for example the reference case with
+`z0 = 20`). Changing that means staggering in `leads_dyna.cpp` and `bench_gpu`
+too, and it would break bit-identity with the existing reference data unless
+all three change together.
+
+**Reproduce.**
 ```
-bench_cpu bench/state_init.bin bench/params.bin out.bin --refine N --nsteps <(nT_orig-1)*N> --halfstep
+bench_cpu bench/state_init.bin bench/params.bin out.bin --refine N --nsteps $((8000*N)) --halfstep
 ```
-at N=1,2,4 (using nsteps so each run lands exactly on +t_shift) and feed the
-three outputs to `convtest coarse medium fine --order 2 --tol 0.25`.
+at N=1,2,4, then `convtest coarse medium fine --order 2 --tol 0.25`.

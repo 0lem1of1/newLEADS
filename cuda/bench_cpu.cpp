@@ -19,15 +19,13 @@
     --refine N   Rebuild the time grid at N x the resolution, spanning the
                  same [-t_shift, t_shift] window read from state_init.bin.
                  Feeds convtest's 3-grid Richardson convergence test.
-    --halfstep   Best-effort reconstruction of a previously-validated
-                 diagnostic: stagger momentum half a step behind position at
-                 the start (single momentum-only half-kick before the main
-                 loop), then resynchronize at the end via the centered
-                 average (p_{n-1/2}+p_{n+1/2})/2, rather than a naive
-                 backward re-push (which was found to double the error).
-                 Flagged here as best-effort since it was rebuilt from
-                 memory -- sanity-check its effect via --refine/convtest
-                 before trusting it quantitatively.
+    --halfstep   Properly staggered leapfrog. Before the main loop, momentum
+                 is kicked BACKWARD half a step (p_{-1/2}); the loop then
+                 keeps it half a step behind position. At the end, one full
+                 forward kick gives p_{n+1/2} and the centered average
+                 (p_{n-1/2}+p_{n+1/2})/2 puts momentum back on position's
+                 time. Second order on posi/velo/momt (see BUGFIXES.md,
+                 items 3 and 4; both fixes are needed).
     --nsteps N   Run exactly N pusher steps instead of the state file's own
                  nT. Without this flag the default is nT (matching
                  leads_dyna.cpp's own `for(i=0;i<nT;i++)` loop bit-for-bit,
@@ -166,9 +164,10 @@ int main(int argc, char** argv)
                 // After the loop, momentum is p_{n-1/2}: staggered dTau/2 BEHIND
                 // position's final time t_final (the initial backward half-kick's
                 // offset is preserved by every subsequent full-dTau step). Take
-                // one more forward half-kick from the final position to get
-                // p_{n+1/2} (dTau/2 AHEAD of t_final), then centered-average the
-                // two to resynchronize momentum onto position's actual time.
+                // one more FULL forward kick from the final position to get
+                // p_{n+1/2} (dTau/2 AHEAD of t_final; a boris_step of dTau/2
+                // would only reach t_final), then centered-average the two to
+                // resynchronize momentum onto position's actual time.
                 const double t_final = -t_shift + steps_to_run*dTau;
                 const double vx_before = vx, vy_before = vy, vz_before = vz;
                 const double px_before = px, py_before = py, pz_before = pz;
@@ -176,18 +175,20 @@ int main(int argc, char** argv)
                 double Ex,Ey,Ez,Bx,By,Bz;
                 laser_profile<M>(t_final, x,y,z, p, Ex,Ey,Ez,Bx,By,Bz);
                 double dummy_x=0, dummy_y=0, dummy_z=0, dummy_ax,dummy_ay,dummy_az;
-                boris_step(dTau/2.0, p.q_part, p.m_part,
+                boris_step(dTau, p.q_part, p.m_part,
                            dummy_x,dummy_y,dummy_z, px,py,pz, vx,vy,vz, dummy_ax,dummy_ay,dummy_az,
                            Ex,Ey,Ez,Bx,By,Bz);
+                // vx,vy,vz now hold v_{n+1/2}; keep them for the centred accl.
+                const double vx_after = vx, vy_after = vy, vz_after = vz;
 
                 px = 0.5*(px_before + px);
                 py = 0.5*(py_before + py);
                 pz = 0.5*(pz_before + pz);
                 gamma_final = sqrt(1 + (((px*px)+(py*py))+(pz*pz)));
                 vx = px/gamma_final; vy = py/gamma_final; vz = pz/gamma_final;
-                ax = (vx - vx_before)/(dTau/2.0);
-                ay = (vy - vy_before)/(dTau/2.0);
-                az = (vz - vz_before)/(dTau/2.0);
+                ax = (vx_after - vx_before)/dTau;
+                ay = (vy_after - vy_before)/dTau;
+                az = (vz_after - vz_before)/dTau;
             }
             else
             {

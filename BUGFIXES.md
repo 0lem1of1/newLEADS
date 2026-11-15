@@ -222,8 +222,70 @@ In the reference case Armadillo before vs after differs by up to 8.4e-8 in
 `TestCase/bench/state_final_arma.bin` and the reference data for the reports.
 Quoted CPU/GPU and Armadillo gaps will change at the 1e-7 level in `momt`.
 
-## Known, not yet fixed
+### 4. The `--halfstep` resync kicked by `dTau/2` instead of `dTau`
 
-| # | Problem | Where |
-|---|---|---|
-| 4 | `--halfstep` resync kicks by `dTau/2` instead of `dTau` | `cuda/bench_cpu.cpp:179` |
+**Where:** `cuda/bench_cpu.cpp`, the end-of-loop block under `if(halfstep)`.
+Only the `--halfstep` path of `bench_cpu` is affected; LEADS, `bench_gpu` and the
+default `bench_cpu` path are untouched.
+
+**Problem.** `--halfstep` kicks momentum back to t0 - dTau/2 before the loop, so
+after the loop it is p_{n-1/2}, half a step behind position. To put it back on
+`t_final` the code took one more forward kick and averaged. It used
+`boris_step(dTau/2, ...)`, which only reaches `t_final`, so the average of
+p_{n-1/2} and p(t_final) sat at `t_final - dTau/4`. That fixed time offset made
+`velo` and `momt` first order. Item 3 also limited momentum to first order, so
+fixing either one alone shows little gain (see the tables below).
+
+**Fix.** Use `boris_step(dTau, ...)`, giving p_{n+1/2}, so the centred average
+lands on `t_final`. The `accl` diagnostic is now the centred difference
+`(v_{n+1/2} - v_{n-1/2})/dTau`. The usage comment is updated.
+
+**How it was checked** (scratch builds before and after, 2026-11-15; "before"
+is the tree with fixes 1 to 3).
+
+- *Against theory: momentum mid-pulse.* In a plane wave `p_perp + (q/m)*A_perp`
+  is conserved, so the exact momentum at any time follows from the vector
+  potential, with no dependence on the pusher. 20 electrons, gamma = 500,
+  a0 = 10, `z0 = 2.5*Tau_FWHM`. The run is stopped at 45% of the window (where
+  the field is on) at `--refine` 1, 2, 4, 8, so every grid ends at the same
+  time. The table gives `max|p_perp - exact|/a0`, then the ratio between
+  successive refinements (2 is first order, 4 is second order).
+
+  | Case | `--halfstep` before | `--halfstep` after | Default path |
+  |---|---|---|---|
+  | Linear, 1 cycle | 2.2e-3 to 2.8e-4 (ratio 2.00) | 6.8e-6 to 1.1e-7 (ratio 4.00) | 4.5e-3 to 5.6e-4 (ratio 2.00) |
+  | Linear, 4 cycles | 1.5e-3 to 1.9e-4 (2.00) | 4.3e-6 to 6.7e-8 (4.00) | 3.0e-3 to 3.7e-4 (2.00) |
+  | Circular, 1 cycle | 1.6e-3 to 2.0e-4 (2.00) | 6.0e-6 to 9.3e-8 (4.00) | 3.2e-3 to 3.9e-4 (2.00) |
+  | Circular, 4 cycles | 1.1e-3 to 1.3e-4 (2.00) | 3.6e-6 to 5.6e-8 (4.00) | 2.1e-3 to 2.6e-4 (2.00) |
+
+  The error is second order only with the fix. The default path, which does not
+  stagger, stays first order, as expected. This test also confirms the sign and
+  normalisation of the Model 0 field from item 2 independently of the code.
+- *Convergence (`convtest --order 2 --tol 0.25`, `--halfstep`).* Orders on
+  posi, velo, momt:
+
+  | Case | Before | After, refine 1/2/4 | After, refine 2/4/8 |
+  |---|---|---|---|
+  | Model 0, reference | 2.00, 1.00, 1.00 | 2.00, 2.00, 2.00 (PASS) | 2.00, 2.00, 2.00 (PASS) |
+  | Model 2, `pola` 0 | 2.00, 1.00, 1.00 | 2.00, 2.00, 2.00 (PASS) | 2.00, 2.00, 2.00 (PASS) |
+  | Model 2, `pola` 1 | 2.00, 1.00, 1.00 | 2.00, 2.00, 2.00 (PASS) | 2.00, 2.00, 2.00 (PASS) |
+
+  `accl` and `egama` are ungated. After items 3 and 4 their errors are about
+  1e-12 and 1e-9, which is round-off, so their observed orders (between -1.6 and
+  1.4) mean nothing. I expected `accl` to reach order 2, and it did not, because
+  of this floor.
+- *No change to the default path.* Without `--halfstep`, old and new `bench_cpu`
+  are `BIT-IDENTICAL` for Model 0 and for Model 2 with `pola` 0 and 1.
+  Armadillo vs `bench_cpu` is still `BIT-IDENTICAL` for the Model 0 reference.
+  `bench_gpu` was not touched.
+- *Free drift.* `--a0 0 --halfstep`: momentum unchanged exactly, and position
+  equals `x0 + v*T` to 1e-13 (positions of order 20).
+
+**After pulling this change.** Only `--halfstep` output changes. Reference data
+is not affected.
+
+**Still first order.** LEADS, `bench_gpu`, and `bench_cpu` without `--halfstep`
+start momentum at t0, not t0 - dTau/2, and report it half a step behind position.
+They are first order wherever the field at the window ends is not negligible.
+Staggering them as well would break bit-identity with existing reference data
+unless `leads_dyna.cpp`, `bench_cpu` and `bench_gpu` all change together.
