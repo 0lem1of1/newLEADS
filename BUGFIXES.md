@@ -146,8 +146,28 @@ is zero either way.
   `BIT-IDENTICAL`.
 - *Convergence unchanged.* `convtest` order is 1.00 on posi/velo/momt before and
   after. That is the known first-order result (items 3 and 4).
-- `validation/thomson_compton_check.py` was not rerun. It uses a0 = 0.01 and
-  10 cycles, where the old residual kick is about 3e-3 of a0.
+- *Thomson check* (`validation/thomson_compton_check.py`, rerun 2026-11-24 with
+  fixes 1-4). The peak moved from -0.003% to +0.137% of `(1+beta)/(1-beta)` at
+  gamma = 50, 100 and 500. That is the fix working, not a new error. With
+  `E = -dA/dt` and a Gaussian `A`, `|E(w)|^2 = w^2 |A(w)|^2`, so the laser's E
+  spectrum peaks at `w_E = (1 + sqrt(1 + 8*alpha))/2`, with
+  `alpha = 4 ln2/Tau_FWHM^2`: +0.140% for 10 cycles. Without `sign(eta)` the
+  extra term was even in `eta` and the spectrum stayed centred on `w0`. Peak
+  against `Thomson * w_E`, gamma = 100:
+
+  | Cycles | Predicted shift | Measured shift | Residual |
+  |---|---|---|---|
+  | 5 | +0.559% | +0.556% | -0.003% |
+  | 10 | +0.140% | +0.137% | -0.003% |
+  | 20 | +0.035% | +0.032% | -0.004% |
+  | 40 (`--ds 0.0005`) | +0.009% | +0.006% | -0.003% |
+
+  The residual is the a0^2/2 redshift, the same as after item 1. The script
+  now prints the `Thomson * w_E` column. It used to also print a
+  `w^2`-weighted peak, on the theory that LEADS lacked Jackson 14.67's `w^2`
+  prefactor. LEADS uses the acceleration form (Jackson 14.65), which has no
+  such factor, and Parseval confirms its normalisation (item 5). That column
+  was counting the factor twice and has been removed.
 
 **After pulling this change.** Every Model 0 result changes. In the reference
 case, Armadillo before vs after differs by up to 0.18 in `momt` and 7.6e-3 in
@@ -289,3 +309,83 @@ start momentum at t0, not t0 - dTau/2, and report it half a step behind position
 They are first order wherever the field at the window ends is not negligible.
 Staggering them as well would break bit-identity with existing reference data
 unless `leads_dyna.cpp`, `bench_cpu` and `bench_gpu` all change together.
+
+### 5. `CalcEmittedSignal` divided by `-n.r` instead of the distance
+
+**Where:** `leads_radi.cpp:196`. Only `SignalEmitted = true` uses it
+(`Data/emitted_signal.dat`). Spectra, angular distributions and the pusher do
+not.
+
+**Problem.** The far field is `E = NNU / (kappa^3 R)` (Jackson 14.14), with
+`R` the distance from the particle to the detector. `RadiationModule` stores
+`vT = TR - n.r`. The comment there says this equals `TR + |R| - r_det`, with
+`r_det` subtracted to keep the numbers small. `CalcEmittedSignal` then took
+`R = vT - TR`, which is `|R| - r_det = -n.r` and never added `r_det` back. So
+the field was divided by the particle's position along `n`, which is zero to
+tens of units and changes sign, instead of by about `1e8`. On axis
+(theta = 180 deg) `-n.r` is just `z`, which passes through zero where the
+electron meets the pulse, exactly where the emission peaks. The
+`abs(R) > 1e-6` guard was presumably there to avoid that zero.
+
+**Fix.** `R = r_det + vT - TR`, which is `|detector - rp|` to `O(r^2/r_det)`
+(about 1e-14 relative). The guard no longer triggers.
+
+**How it was checked** (`validation/emitted_signal_check.py`, 2026-11-24). One
+electron, gamma = 100, a0 = 0.01, 10 cycles, Model 0, detector on axis. With
+`f = R*E` against observer time `T`, a correct signal must satisfy two
+conditions. Its energy must match the radiated power (Parseval), and its
+Fourier transform must reproduce `spectrum.dat`, which is checked against
+Thomson (item 2). Both follow from `dT = kappa dt`.
+
+| Check | Before | After |
+|---|---|---|
+| `int |f|^2 dT / int dP/dOmega dt` | 1.6e19 | 1.000000 |
+| Peak of `|FT f|^2` / peak of `spectrum.dat` | 1.82 | 1.000000 |
+| Shape, relative L2 against `spectrum.dat` | 3.3 | 1.1e-9 |
+
+`(1/pi) int S dw / int dP/dOmega dt` is 1.00001 in both builds, so
+`SpectrumCalculate` and `RadiationModule` agree on normalisation by
+themselves.
+
+**After pulling this change.** Any `emitted_signal.dat` from older builds is
+wrong. For one particle the new output is correct. For a bunch, see item 6.
+
+## Found, not fixed
+
+### 6. `CalcEmittedSignal` sums particles at equal retarded time, not equal observer time
+
+**Where:** `leads_radi.cpp:191-208`.
+
+**Problem.** The signal at the detector at observer time `T` is the sum of
+every particle's field arriving at `T`. The code instead sums particles at
+the same step `i`, which means the same emission time `TR(i)`. Their arrival
+times `vT(np,i)` differ by about the bunch length, and it labels the sum with
+their mean. In a plane wave each particle's path is the reference path
+translated by `a = dc/(1+beta)` in both `z` and `t`, where `c` is the ballistic
+intercept. So at fixed `i` the particles differ in lab-frame oscillation phase
+by `dc`. The code adds them with those phases. The true signal adds them at
+observer-frame phases about `4*gamma^2` times larger. Energy is therefore off by
+about `|sum exp(i dc)|^2 / N`.
+
+**Measured** (same script, 20 particles from the default bunch shape, fix 5
+applied). The exact summed signal comes from the single-particle signal and
+each particle's shift `2a` in `T`:
+
+| Quantity | Value |
+|---|---|
+| Exact energy / (N * single-particle energy) | 1.0000 |
+| LEADS energy / exact | 7.33 |
+| Predicted `|sum exp(i dc)|^2 / N` | 7.35 |
+| Same prediction for the 5000-particle reference bunch | about 1060 |
+
+`spectrum.dat` is unaffected. It sums `|I|^2` per particle, giving exactly
+N times the single-particle spectrum, which is the documented incoherent
+model.
+
+**Why not fixed.** A correct sum needs each particle's signal resampled onto a
+common observer-time grid. The grid has to resolve the backscattered period
+`2*pi/(4*gamma^2)`, about 6e-6 at gamma = 500, across the bunch's spread in `T`,
+about the bunch length (4). For the reference bunch that is about 6e5 periods,
+or about 1e7 points per angle at 10 points per period. The options are to
+sum only within a chosen observer window, to write per-particle signals, or to
+restrict `SignalEmitted` to `NP = 1`. That choice needs a decision first.

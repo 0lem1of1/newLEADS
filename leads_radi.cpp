@@ -193,7 +193,7 @@ void LEADS_Dynamics :: CalcEmittedSignal(double thSpec,double phSpec)
     t_lab_np.fill(0);
     for(int np = 0; np < NP; np++)
     {
-      R = vT(np,i) - TR(i) ;  
+      R = r_det + vT(np,i) - TR(i) ;  // = |detector - rp|, since vT = TR + |R| - r_det
       
       if(abs(R) > 1.0E-6)
       {      
