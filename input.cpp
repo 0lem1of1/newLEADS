@@ -20,7 +20,7 @@ LEADS_Input :: LEADS_Input()
    //Tau_FWHM = 10.0 * (Omega * fs);                               // Duration in fs
    
    PulseProfile = log(2.0)/log(2.0);    // log(n)/log(2) ; n =2 gaussian, n = 4 super-gaussian etc. 
-   PulseModel   = 1;    // 0 <= PulseModel <= 3; See Parameter info at bottom
+   PulseModel   = 0;    // 0 <= PulseModel <= 3; See Parameter info at bottom
    BeamWaist    = 3;    // Beam Waist size in 'micrometers'
    Polarization = 0;    // 0 - Linear (Ex,By,kz) ; 1 - Circular (ExBx,EyBy,kz)
    PulsePhase   = 0;    // in radians
