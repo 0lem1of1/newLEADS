@@ -178,8 +178,13 @@ Resolved assumptions:
 - Initial distribution comes from `leads_init.cpp` (GSL Gaussian radius
   `BunchRadius`, flat length `BunchLength`, centered at `z0`); default
   bunch is already inside Model 2's focal region.
-- `pola=-1` (optional handedness check) was not run against Armadillo; the
-  field harness shows it identical to `pola=1`.
+- `pola=-1` (handedness check) run against Armadillo on 2026-11-24, reference
+  in `TestCase/bench_model2_pola-1/`. LEADS vs `bench_cpu`: L2 posi 1.1e-13,
+  momt 7.1e-13, egama 1.5e-12. `bench_cpu` vs `bench_gpu`: posi 2.9e-13, momt
+  1.9e-10. `--a0 0` CPU vs GPU is BIT-IDENTICAL. Same level as `pola` 0 and
+  1. The case is not trivially equal to `pola=1`: their LEADS final states
+  differ by L2 0.96 in momt. (Earlier note: the field harness gives the same
+  error statistics for -1 as for 1.)
 
 ---
 
