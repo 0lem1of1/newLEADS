@@ -1,7 +1,7 @@
 FILE=$(f)
 export FILE
 default:
-	g++ -c -larmadillo -lgsl -lgslcblas -lm -O3 leads_$(FILE).cpp
+	g++ -std=c++17 -c -larmadillo -lgsl -lgslcblas -lm -O3 leads_$(FILE).cpp
 	mkdir -p ./files
 	mkdir -p ./TestCase/Data
 	mv *.o ./files
@@ -10,7 +10,7 @@ default:
 	cp input.cpp ./TestCase
 	cp RunMakefile ./TestCase/Makefile
 all:
-	g++ -c -larmadillo -lgsl -lgslcblas -lm -O3 leads_*.cpp
+	g++ -std=c++17 -c -larmadillo -lgsl -lgslcblas -lm -O3 leads_*.cpp
 	mkdir -p ./files
 	mkdir -p ./TestCase/Data
 	mv *.o ./files

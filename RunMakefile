@@ -1,4 +1,4 @@
 default:
 	rm -rf ./Data/*
 	cp input.cpp ./Data
-	g++ -o leads ./files/*.o input.cpp  -larmadillo -lgsl -lgslcblas -lm -O3 
+	g++ -std=c++17 -o leads ./files/*.o input.cpp  -larmadillo -lgsl -lgslcblas -lm -O3
