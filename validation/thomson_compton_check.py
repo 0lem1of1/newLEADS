@@ -16,12 +16,26 @@ The Compton edge is printed so the size of the (unmodelled) recoil correction
 can be compared with the numerical error: at 800 nm it is 1.2e-3 for gamma=100
 and 6.1e-3 for gamma=500.
 
+For a finite pulse the right reference is not (1+beta)/(1-beta) itself. Model 0
+builds E = -dA/dt from A = a0 g(eta) cos(eta) with g = exp(-alpha eta^2) and
+alpha = 4 ln2 / Tau_FWHM^2, so |E(w)|^2 = w^2 |A(w)|^2 peaks above w0, at
+
+    w_E / w0 = (1 + sqrt(1 + 8 alpha)) / 2      (+0.140% for 10 cycles, +0.559% for 5)
+
+and the backscattered peak sits at Thomson * w_E/w0. The script prints both.
+(Before BUGFIXES.md item 2 the envelope term had no sign(eta), the field
+spectrum was symmetric about w0, and the peak landed on plain Thomson.) The
+measured peak tracks this factor at 5, 10, 20 and 40 cycles, with a residual
+of -0.003% to -0.004% each time (2026-11-24, gamma = 100).
+
 Residual systematics even for a correct code (all small for long pulses):
   * a0^2/2 redshift of the fundamental (not modelled; <= 5e-5 for a0 = 0.01,
     ~3e-5 measured after averaging over the pulse envelope).
-  * LEADS's spectrum is |int ...|^2 without Jackson 14.67's w^2 prefactor, which
-    moves the peak up by ~ w0^2/sigma_t^2 (about 0.14% for 10 cycles). The
-    script therefore reports the raw peak and the w^2-weighted peak.
+  * LEADS's spectrum is Jackson 14.65, the acceleration form, which has no w^2
+    prefactor. (validation/emitted_signal_check.py checks its normalisation by
+    Parseval to 1e-5.) Weighting it by w^2 would count the factor twice.
+  * At 40 cycles and longer the default --ds (0.9% per point) is coarser than
+    the peak; use e.g. --ds 0.0005 --window -0.05 0.03.
   * Without the grid fix the result is not a fixed 0.5x: the retarded-time step
     error is (2*t_shift/dTau)'s int() truncation plus (1-beta), amplified by
     1/(1-beta), so the peak can land more than a decade below theory (widen
@@ -60,6 +74,12 @@ def thomson_peak(gamma):
     """Classical head-on backscatter, in units of w0: (1+b)/(1-b) = (1+b)^2 g^2."""
     b = beta_of(gamma)
     return (1.0 + b) ** 2 * gamma ** 2
+
+
+def pulse_factor(cycles):
+    """Peak of the Model 0 E-field spectrum in units of w0 (Gaussian envelope, PulseProfile = 1)."""
+    alpha = 4.0 * math.log(2.0) / (2.0 * math.pi * cycles) ** 2
+    return (1.0 + math.sqrt(1.0 + 8.0 * alpha)) / 2.0
 
 
 def compton_edge(gamma, wavelength_nm):
@@ -149,11 +169,10 @@ def run_case(label, files_dir, gamma, a, workdir):
 
 
 # ----------------------------------------------------------------- report --
-def analyse(path, gamma, wavelength_nm):
+def analyse(path, gamma, wavelength_nm, cycles):
     s, y = load_spectrum(path)
     wt, wc = thomson_peak(gamma), compton_edge(gamma, wavelength_nm)
-    raw, w2 = find_peak(s, y), find_peak(s, y * s ** 2)
-    return wt, wc, raw, w2
+    return wt, wc, wt * pulse_factor(cycles), find_peak(s, y)
 
 
 def main():
@@ -179,7 +198,7 @@ def main():
     if a.spectrum:
         if a.gamma is None:
             ap.error("--spectrum needs --gamma")
-        rows.append(("file", a.gamma) + analyse(a.spectrum, a.gamma, a.wavelength_nm))
+        rows.append(("file", a.gamma) + analyse(a.spectrum, a.gamma, a.wavelength_nm, a.cycles))
     else:
         variants = [v.split("=", 1) for v in (a.variant or ["current=" + str(REPO / "files")])]
         a.workdir.mkdir(parents=True, exist_ok=True)
@@ -187,20 +206,19 @@ def main():
         with ThreadPoolExecutor(max_workers=min(len(jobs), os.cpu_count() or 1)) as ex:
             futs = [ex.submit(run_case, lab, d, g, a, a.workdir) for lab, d, g in jobs]
             for (lab, d, g), f in zip(jobs, futs):
-                rows.append((lab, g) + analyse(f.result(), g, a.wavelength_nm))
+                rows.append((lab, g) + analyse(f.result(), g, a.wavelength_nm, a.cycles))
 
     print("\nOn-axis (theta=180) peak, head-on, a0=%g, %g cycles; errors are (peak/theory - 1)" % (a.a0, a.cycles))
-    print("%-8s %6s %12s %12s | %12s %9s %9s | %12s %9s %9s" %
-          ("variant", "gamma", "Thomson", "Compton", "peak(raw)", "vs Thom", "vs Comp",
-           "peak(w^2)", "vs Thom", "vs Comp"))
-    for lab, g, wt, wc, raw, w2 in rows:
-        print("%-8s %6g %12.5g %12.5g | %12.5g %+8.3f%% %+8.3f%% | %12.5g %+8.3f%% %+8.3f%%" %
-              (lab, g, wt, wc, raw, 100 * (raw / wt - 1), 100 * (raw / wc - 1),
-               w2, 100 * (w2 / wt - 1), 100 * (w2 / wc - 1)))
+    print("%-8s %6s %12s %12s %12s | %12s %9s %9s %9s" %
+          ("variant", "gamma", "Thomson", "Thom*pulse", "Compton", "peak", "vs Thom", "vs pulse", "vs Comp"))
+    for lab, g, wt, wc, wp, pk in rows:
+        print("%-8s %6g %12.5g %12.5g %12.5g | %12.5g %+8.3f%% %+8.3f%% %+8.3f%%" %
+              (lab, g, wt, wp, wc, pk, 100 * (pk / wt - 1), 100 * (pk / wp - 1), 100 * (pk / wc - 1)))
+    print("pulse factor w_E/w0 for %g cycles: %.6f (see docstring)" % (a.cycles, pulse_factor(a.cycles)))
     print("\nCompton recoil shift (Thomson->Compton edge): " +
           ", ".join("gamma=%g: %+.3f%%" % (g, 100 * (compton_edge(g, a.wavelength_nm) / thomson_peak(g) - 1))
                     for g in a.gammas))
-    if any(math.isnan(r[4]) for r in rows):
+    if any(math.isnan(r[5]) for r in rows):
         print("NaN peak = maximum at the window edge; widen --window.", file=sys.stderr)
 
 
